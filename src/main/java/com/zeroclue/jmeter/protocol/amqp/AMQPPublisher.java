@@ -63,7 +63,6 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
     public static final String DEFAULT_CONTENT_TYPE  = "text/plain";
     public static final String DEFAULT_ENCODING      = "utf-8";
 
-    private transient Channel channel;
 
     public AMQPPublisher() {
         super();
@@ -82,9 +81,7 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
         try {
             initChannel();
         } catch (Exception ex) {
-            log.error("Failed to initialize channel : ", ex);
-            result.setResponseMessage(ex.toString());
-            return result;
+            //ignore
         }
 
         String data = getMessage();     // sampler data
@@ -97,7 +94,13 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
         int loop = getIterationsAsInt();
         result.sampleStart();   // start timing
 
-        try {
+        try (BorrowedChannel borrowedChannel = borrowChannel()){
+
+            Channel channel = borrowedChannel.getChannel();
+            if (getUseTx()) {
+                channel.txSelect();
+            }
+
             AMQP.BasicProperties messageProperties = getProperties();
             byte[] messageBytes = getMessageBytes();
 
@@ -287,15 +290,7 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
         return true;
     }
 
-    @Override
-    protected Channel getChannel() {
-        return channel;
-    }
 
-    @Override
-    protected void setChannel(Channel channel) {
-        this.channel = channel;
-    }
 
     protected AMQP.BasicProperties getProperties() {
         final AMQP.BasicProperties.Builder builder = new AMQP.BasicProperties.Builder();
@@ -331,16 +326,6 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
         return builder.build();
     }
 
-    @Override
-    protected boolean initChannel() throws IOException, NoSuchAlgorithmException, KeyManagementException, TimeoutException {
-        boolean ret = super.initChannel();
-
-        if (getUseTx()) {
-            channel.txSelect();
-        }
-
-        return ret;
-    }
 
     private Map<String, Object> prepareHeaders() {
         Arguments headers = getHeaders();

@@ -1,6 +1,5 @@
 package com.zeroclue.jmeter.protocol.amqp;
 
-import com.rabbitmq.client.AMQP;
 import com.rabbitmq.client.Address;
 import com.rabbitmq.client.AlreadyClosedException;
 import com.rabbitmq.client.Channel;
@@ -9,15 +8,18 @@ import com.rabbitmq.client.ConnectionFactory;
 import com.rabbitmq.client.ShutdownSignalException;
 
 import java.io.IOException;
+import java.lang.ref.WeakReference;
 import java.security.KeyManagementException;
 import java.security.NoSuchAlgorithmException;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.TimeoutException;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.pool2.BasePooledObjectFactory;
+import org.apache.commons.pool2.PooledObject;
+import org.apache.commons.pool2.impl.DefaultPooledObject;
+import org.apache.commons.pool2.impl.GenericObjectPool;
+import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import org.apache.jmeter.samplers.AbstractSampler;
 import org.apache.jmeter.testelement.ThreadListener;
 import org.slf4j.Logger;
@@ -99,42 +101,35 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
     public static final int DEFAULT_MIN_PRIORITY = 0;
     public static final int DEFAULT_MAX_PRIORITY = 255;
 
-    // The value is in seconds, and default value suggested by RabbitMQ is 60.
-    public static final int DEFAULT_HEARTBEAT = 60;
+    // The value is in seconds, and default value suggested by RabbitMQ is 10.
+    public static final int DEFAULT_HEARTBEAT = 10;
     public static final String DEFAULT_HEARTBEAT_STRING = Integer.toString(DEFAULT_HEARTBEAT);
 
     private final transient ConnectionFactory factory;
-    private transient Connection connection;
 
     protected AMQPSampler() {
         this.factory = new ConnectionFactory();
         this.factory.setRequestedHeartbeat(DEFAULT_HEARTBEAT);
     }
 
-    protected boolean initChannel() throws IOException, NoSuchAlgorithmException, KeyManagementException, TimeoutException {
-        Channel channel = getChannel();
+    private boolean isInitial;
 
-        try {
-            if (channel != null && !channel.isOpen()) {
-                log.warn("Channel {} closed unexpectedly: {}", channel.getChannelNumber(), channel.getCloseReason());
-                channel = null;     // so we re-open it below
-            }
+    protected boolean initChannel() throws Exception {
 
-            if (channel == null) {
-                channel = createChannel();
-                setChannel(channel);
+        if (!isInitial) {
 
-                boolean queueConfigured = configureQueue(channel);
+            try( BorrowedChannel channel = borrowChannel()) {
+                boolean queueConfigured = configureQueue(channel.getChannel());
 
                 if (!StringUtils.isBlank(getExchange())) {   // use a named exchange
                     if (getExchangeRedeclare()) {
                         deleteExchange();
                     }
 
-                    AMQP.Exchange.DeclareOk declareExchangeResp = channel.exchangeDeclare(getExchange(), getExchangeType(), getExchangeDurable(), getExchangeAutoDelete(), Collections.<String, Object>emptyMap());
+                    channel.getChannel().exchangeDeclare(getExchange(), getExchangeType(), getExchangeDurable(), getExchangeAutoDelete(), Collections.emptyMap());
 
                     if (queueConfigured) {
-                        channel.queueBind(getQueue(), getExchange(), getRoutingKey());
+                        channel.getChannel().queueBind(getQueue(), getExchange(), getRoutingKey());
                     }
                 }
 
@@ -144,12 +139,13 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
                         + "\n\t durable: {}"
                         + "\n\t routing key: {}"
                         + "\n\t arguments: {}",
-                        getQueue(), getExchange(), getExchangeDurable(), getRoutingKey(), getQueueArguments());
+                    getQueue(), getExchange(), getExchangeDurable(), getRoutingKey(), getQueueArguments());
             }
-        } catch (Exception ex) {
-            log.debug(ex.toString(), ex);
-            // ignore it
+            catch (Exception e){
+                log.warn("initial channel fail {}", e.getMessage(), e);
+            }
         }
+        isInitial = true;
 
         return true;
     }
@@ -162,7 +158,7 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
                 deleteQueue();
             }
 
-            AMQP.Queue.DeclareOk declareQueueResp = channel.queueDeclare(getQueue(), queueDurable(), queueExclusive(), queueAutoDelete(), getQueueArguments());
+            channel.queueDeclare(getQueue(), queueDurable(), queueExclusive(), queueAutoDelete(), getQueueArguments());
         }
         return queueConfigured;
     }
@@ -185,9 +181,7 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
         return arguments;
     }
 
-    protected abstract Channel getChannel();
 
-    protected abstract void setChannel(Channel channel);
 
     /**
      * @return a string for the sampleResult Title
@@ -401,8 +395,12 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
     }
 
     public int getHeartbeatAsInt() {
-        int hb = getPropertyAsInt(HEARTBEAT);
+        String hbstr = getPropertyAsString(HEARTBEAT);
 
+        if(StringUtils.isEmpty(hbstr)){
+            return DEFAULT_HEARTBEAT;
+        }
+        int hb = Integer.parseInt(hbstr);
         if ((hb >= 0) && (hb <= 60)) {
             return hb;
         }
@@ -479,119 +477,265 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
     }
 
     protected void cleanup() {
-        try {
-            // getChannel().close();   // closing the connection will close the channel if it's still open
-            if (connection != null && connection.isOpen()) {
+        if(connection == null) return;
+        synchronized (sharedConnection) {
+            if (!connection.removeReference(this)) {
                 connection.close();
+                sharedConnection.remove(connection.getCacheKey());
             }
-        } catch (IOException e) {
-            log.error("Failed to close connection", e);
-        } catch (AlreadyClosedException e) {
-            log.error("Connection already closed", e);
-        } catch (ShutdownSignalException e) {
-            log.error("Connection shutdown by thread close", e);
+
         }
     }
 
     @Override
     public void threadFinished() {
-        log.info("AMQPSampler.threadFinished called");
         cleanup();
     }
 
     @Override
     public void threadStarted() {
-        log.info("AMQPSampler.threadStarted called");
     }
 
-    protected Channel createChannel() throws IOException, NoSuchAlgorithmException, KeyManagementException, TimeoutException {
-         log.info("Creating channel {}:{}", getVirtualHost(), getPortAsInt());
+    private static final Map<String, CachedConnection> sharedConnection = Collections.synchronizedMap( new HashMap<>());
 
-         if (connection == null || !connection.isOpen()) {
-            factory.setConnectionTimeout(getTimeoutAsInt());
-            factory.setVirtualHost(getVirtualHost());
-            factory.setUsername(getUsername());
-            factory.setPassword(getPassword());
-            factory.setRequestedHeartbeat(getHeartbeatAsInt());
+    public static class CachedConnection{
+        private final String cacheKey;
+        private final Connection connection;
 
-            if (getConnectionSSL()) {
-                factory.useSslProtocol(DEFAULT_SSL_PROTOCOL);
+        private final GenericObjectPool<Channel> channelPool ;
+
+        private final List<WeakReference<Object>> references = new ArrayList<>();
+
+        public void addReference(Object object){
+            synchronized (references) {
+                references.add(new WeakReference<>(object));
             }
+        }
 
-            log.info("RabbitMQ ConnectionFactory using:"
-                    + "\n\t virtual host: {}"
-                    + "\n\t host: {}"
-                    + "\n\t port: {}"
-                    + "\n\t username: {}"
-                    + "\n\t password: {}"
-                    + "\n\t timeout: {}"
-                    + "\n\t heartbeat: {}"
-                    + "\nin {}",
-                    getVirtualHost(), getHost(), getPort(), getUsername(), getPassword(), getTimeout(),
-                    getHeartbeatAsInt(), this);
-
-            String[] hosts = getHost().split(",");
-            Address[] addresses = new Address[hosts.length];
-
-            for (int i = 0; i < hosts.length; i++) {
-                addresses[i] = new Address(hosts[i], getPortAsInt());
+        public boolean removeReference(Object object){
+            synchronized (references) {
+                for (WeakReference<Object> ref : new ArrayList<>( references)) {
+                    if(ref.get()==null|| ref.get() == object){
+                        references.remove(ref);
+                    }
+                }
+                return !references.isEmpty();
             }
+        }
 
-            if (log.isDebugEnabled()) {
-                log.debug("Using hosts: {} addresses: {}", Arrays.toString(hosts), Arrays.toString(addresses));
-            }
+        public void close(){
+            log.info("close connection {}", cacheKey);
 
-            connection = factory.newConnection(addresses);
-         }
-
-         Channel channel = connection.createChannel();
-
-         if (!channel.isOpen()) {
-             log.error("Failed to open channel: {}", channel.getCloseReason().getLocalizedMessage());
-         }
-
-         return channel;
-    }
-
-    protected void deleteQueue() throws IOException, NoSuchAlgorithmException, KeyManagementException, TimeoutException {
-        // use a different channel since channel closes on exception.
-        Channel channel = createChannel();
-
-        try {
-            log.info("Deleting queue {}", getQueue());
-            channel.queueDelete(getQueue());
-        } catch (Exception ex) {
-            log.debug(ex.toString(), ex);
-            // ignore it
-        } finally {
-            if (channel.isOpen()) {
+            channelPool.close();
+            for (Channel channel: consumeChannel){
                 try {
                     channel.close();
-                } catch (TimeoutException e) {
-                    log.error("Timeout Exception: cannot close channel", e);
+                } catch (Exception e) {
+                    log.warn("close channel error", e);
                 }
             }
+            consumeChannel.clear();
+            try {
+                connection.close();
+            } catch (IOException e) {
+                log.warn("close channel error", e);
+            }
+
+        }
+
+        private final List<Channel> consumeChannel = new ArrayList<>();
+
+        public CachedConnection(String cacheKey, Connection connection){
+            this.cacheKey = cacheKey;
+            this.connection = connection;
+            GenericObjectPoolConfig objectPoolConfig = new GenericObjectPoolConfig();
+            objectPoolConfig.setMinIdle(1);
+            objectPoolConfig.setMaxIdle(10);
+            objectPoolConfig.setMaxTotal(100);
+            this.channelPool = new GenericObjectPool<>(new BasePooledObjectFactory<Channel>() {
+                @Override
+                public Channel create() throws Exception {
+                    log.debug("pool create channel");
+                    return connection.createChannel();
+                }
+
+                @Override
+                public PooledObject<Channel> wrap(Channel channel) {
+                    return new DefaultPooledObject<>(channel);
+                }
+
+                @Override
+                public boolean validateObject(PooledObject<Channel> p) {
+                    return p.getObject().isOpen();
+                }
+
+
+                @Override
+                public void destroyObject(PooledObject<Channel> p) throws Exception {
+                    log.debug("pool destroy channel");
+                    try {
+                        p.getObject().close();
+                    } catch (Exception e){
+
+                    }
+                    super.destroyObject(p);
+                }
+
+            },objectPoolConfig);
+        }
+
+        public Channel borrawChannel() throws Exception {
+            log.debug("borrow channel");
+            return channelPool.borrowObject();
+        }
+
+        public void returnChannel(Channel channel){
+            log.debug("return channel");
+            channelPool.returnObject(channel);
+        }
+        public Channel createChannel() throws IOException {
+            log.debug("create channel");
+            Channel channel = connection.createChannel();
+            consumeChannel.add(channel);
+            return channel;
+        }
+
+        public void removeChannel(Channel channel){
+            log.debug("remove channel");
+            try {
+                channel.close();
+            } catch (Exception e) {
+                log.warn("close channel error", e);
+            }
+            this.consumeChannel.remove(channel);
+        }
+
+        public String getCacheKey() {
+            return cacheKey;
         }
     }
 
-    protected void deleteExchange() throws IOException, NoSuchAlgorithmException, KeyManagementException, TimeoutException {
-        // use a different channel since channel closes on exception
-        Channel channel = createChannel();
+    public static class ChannelWrapper {
 
-        try {
+        protected Channel channel;
+
+
+        public Channel getChannel() {
+            return channel;
+        }
+        public ChannelWrapper(Channel channel ) {
+            this.channel = channel;
+        }
+    }
+    public static class BorrowedChannel extends ChannelWrapper implements AutoCloseable {
+
+        private final CachedConnection connection;
+
+
+        public BorrowedChannel(Channel channel, CachedConnection connection) {
+            super(channel);
+            this.connection = connection;
+        }
+
+        @Override
+        public void close()  {
+            this.connection.returnChannel(this.channel);
+        }
+    }
+    private String getCacheKey(){
+        return  "amqp://" +
+            getUsername() +
+            "@" +
+            getHost() + ":" + getPortAsInt() + getVirtualHost()+"?ssl="+getConnectionSSL() ;
+
+    }
+
+    protected BorrowedChannel borrowChannel() throws Exception {
+        CachedConnection connection = getConnection();
+        return new BorrowedChannel( connection.borrawChannel(), connection);
+    }
+    protected ChannelWrapper createChannel() throws Exception {
+        CachedConnection connection = getConnection();
+        return new ChannelWrapper( connection.createChannel());
+    }
+    private CachedConnection connection;
+    private CachedConnection getConnection() throws Exception {
+        if(connection!=null) return connection;
+
+        String cacheKey = getCacheKey();
+
+        synchronized (sharedConnection) {
+            connection = sharedConnection.get(cacheKey);
+
+            if (connection == null ) { //|| !connection.isOpen()
+                log.info("Creating connection {}", cacheKey);
+                factory.setConnectionTimeout(getTimeoutAsInt());
+                factory.setVirtualHost(getVirtualHost());
+                factory.setUsername(getUsername());
+                factory.setPassword(getPassword());
+                factory.setRequestedHeartbeat(getHeartbeatAsInt());
+                factory.setAutomaticRecoveryEnabled(true);
+
+                if (getConnectionSSL()) {
+                    factory.useSslProtocol(DEFAULT_SSL_PROTOCOL);
+                }
+
+                log.info("RabbitMQ ConnectionFactory using:"
+                        + "\n\t virtual host: {}"
+                        + "\n\t host: {}"
+                        + "\n\t port: {}"
+                        + "\n\t username: {}"
+                        + "\n\t password: {}"
+                        + "\n\t timeout: {}"
+                        + "\n\t heartbeat: {}"
+                        + "\nin {}",
+                        getVirtualHost(), getHost(), getPort(), getUsername(), getPassword(), getTimeout(),
+                        getHeartbeatAsInt(), this);
+
+                String[] hosts = getHost().split(",");
+                Address[] addresses = new Address[hosts.length];
+
+                for (int i = 0; i < hosts.length; i++) {
+                    addresses[i] = new Address(hosts[i], getPortAsInt());
+                }
+
+                if (log.isDebugEnabled()) {
+                    log.debug("Using hosts: {} addresses: {}", Arrays.toString(hosts), Arrays.toString(addresses));
+                }
+
+                connection = new CachedConnection(cacheKey, factory.newConnection(addresses));
+
+                sharedConnection.put(cacheKey, connection);
+            }
+
+        }
+
+        connection.addReference(this);
+        return connection;
+
+    }
+
+
+    protected void deleteQueue() {
+        // use a different channel since channel closes on exception.
+
+        try (BorrowedChannel channel = borrowChannel()) {
+            log.info("Deleting queue {}", getQueue());
+            channel.getChannel().queueDelete(getQueue());
+        } catch (Exception ex) {
+            log.debug(ex.toString(), ex);
+            // ignore it
+        }
+    }
+
+    protected void deleteExchange() throws IOException, KeyManagementException, TimeoutException {
+        // use a different channel since channel closes on exception
+        try (BorrowedChannel channel = borrowChannel()) {
             log.info("Deleting exchange {}", getExchange());
-            channel.exchangeDelete(getExchange());
+            channel.getChannel().exchangeDelete(getExchange());
         } catch (Exception ex) {
             log.warn(ex.toString(), ex);
             // ignore it
-        } finally {
-            if (channel.isOpen()) {
-                try {
-                    channel.close();
-                } catch (TimeoutException e) {
-                    log.error("Timeout Exception: cannot close channel", e);
-                }
-            }
         }
     }
 }

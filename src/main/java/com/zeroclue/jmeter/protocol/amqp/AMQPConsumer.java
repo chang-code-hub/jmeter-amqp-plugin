@@ -60,7 +60,6 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
     public static final String DEFAULT_RESPONSE_CODE = "500";
     public static final String DEFAULT_RECEIVE_TIMEOUT = "";
 
-    private transient Channel channel;
     private transient DeliverCallback consumer;
     private transient BlockingQueue<Delivery> response;
     private transient String consumerTag;
@@ -81,7 +80,9 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
 
         trace("AMQPConsumer.sample()");
 
+
         try {
+
             initChannel();
 
             if (purgeQueue()) {
@@ -176,15 +177,7 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
         return result;
     }
 
-    @Override
-    protected Channel getChannel() {
-        return channel;
-    }
 
-    @Override
-    protected void setChannel(Channel channel) {
-        this.channel = channel;
-    }
 
     /**
      * @return the whether to purge the queue
@@ -348,9 +341,14 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
         log.debug("{} {} {} {}", tn, tl, s, th);
     }
 
+    private Channel channel;
     @Override
-    protected boolean initChannel() throws IOException, NoSuchAlgorithmException, KeyManagementException, TimeoutException {
+    protected boolean initChannel() throws Exception {
         boolean ret = super.initChannel();
+
+        if(channel == null){
+            channel = createChannel().getChannel();
+        }
         channel.basicQos(getPrefetchCountAsInt());
 
         if (getUseTx()) {
