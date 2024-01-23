@@ -2,12 +2,14 @@ package com.zeroclue.jmeter.protocol.amqp.gui;
 
 import com.zeroclue.jmeter.protocol.amqp.AMQPConsumer;
 
-import javax.swing.JCheckBox;
-import javax.swing.JPanel;
+import javax.swing.*;
 
+import com.zeroclue.jmeter.protocol.amqp.AMQPPublisher;
 import org.apache.jmeter.gui.util.HorizontalPanel;
 import org.apache.jmeter.testelement.TestElement;
 import org.apache.jorphan.gui.JLabeledTextField;
+
+import java.awt.*;
 
 /**
  * GUI for AMQP Consumer.
@@ -19,17 +21,21 @@ public class AMQPConsumerGui extends AMQPSamplerGui {
     private final JLabeledTextField receiveTimeout = new JLabeledTextField("Receive Timeout");
     private final JLabeledTextField prefetchCount = new JLabeledTextField("   Prefetch Count");
 
+    private final JLabeledTextField messageId = new JLabeledTextField("           Message ID");
+    private final JLabeledTextField correlationId = new JLabeledTextField("       Correlation ID");
+
     private final JCheckBox purgeQueue = new JCheckBox("Purge Queue", AMQPConsumer.DEFAULT_PURGE_QUEUE);
     private final JCheckBox autoAck = new JCheckBox("Auto ACK", AMQPConsumer.DEFAULT_AUTO_ACK);
     private final JCheckBox readResponse = new JCheckBox("Read Response", AMQPConsumer.DEFAULT_READ_RESPONSE);
     private final JCheckBox useTx = new JCheckBox("Use Transactions", AMQPConsumer.DEFAULT_USE_TX);
 
+    private static final String MSG_SETTINGS_LABEL = "Message";
+    private static final String PROPS_SETTINGS_LABEL = "Properties";
     private JPanel mainPanel;
 
     public AMQPConsumerGui() {
         init();
     }
-
     /**
      * {@inheritDoc}
      */
@@ -55,6 +61,8 @@ public class AMQPConsumerGui extends AMQPSamplerGui {
         optionsPanel.add(autoAck);
         optionsPanel.add(readResponse);
         optionsPanel.add(useTx);
+        optionsPanel.add(messageId);
+        optionsPanel.add(correlationId);
 
         mainPanel.add(receiveTimeout);
         mainPanel.add(prefetchCount);
@@ -81,6 +89,9 @@ public class AMQPConsumerGui extends AMQPSamplerGui {
         purgeQueue.setSelected(sampler.purgeQueue());
         autoAck.setSelected(sampler.autoAck());
         useTx.setSelected(sampler.getUseTx());
+
+        correlationId.setText(sampler.getCorrelationId());
+        messageId.setText(sampler.getMessageId());
     }
 
     /**
@@ -95,6 +106,8 @@ public class AMQPConsumerGui extends AMQPSamplerGui {
         receiveTimeout.setText(AMQPConsumer.DEFAULT_RECEIVE_TIMEOUT);
         purgeQueue.setSelected(AMQPConsumer.DEFAULT_PURGE_QUEUE);
         autoAck.setSelected(AMQPConsumer.DEFAULT_AUTO_ACK);
+        correlationId.setText("");
+        messageId.setText("");
     }
 
     /**
@@ -125,6 +138,8 @@ public class AMQPConsumerGui extends AMQPSamplerGui {
         sampler.setPurgeQueue(purgeQueue.isSelected());
         sampler.setAutoAck(autoAck.isSelected());
         sampler.setUseTx(useTx.isSelected());
+        sampler.setCorrelationId(correlationId.getText());
+        sampler.setMessageId(messageId.getText());
     }
 
     @Override

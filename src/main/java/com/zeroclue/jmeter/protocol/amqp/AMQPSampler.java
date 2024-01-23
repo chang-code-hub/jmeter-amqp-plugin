@@ -95,7 +95,7 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
     public static final int DEFAULT_TIMEOUT = 1000;
     public static final String DEFAULT_TIMEOUT_STRING = Integer.toString(DEFAULT_TIMEOUT);
 
-    public static final int DEFAULT_ITERATIONS = 1;
+    public static final int DEFAULT_ITERATIONS = -1;
     public static final String DEFAULT_ITERATIONS_STRING = Integer.toString(DEFAULT_ITERATIONS);
 
     public static final int DEFAULT_MIN_PRIORITY = 0;

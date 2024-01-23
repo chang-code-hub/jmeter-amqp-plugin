@@ -6,6 +6,8 @@ import com.rabbitmq.client.DeliverCallback;
 import com.rabbitmq.client.Delivery;
 import com.rabbitmq.client.ShutdownSignalException;
 
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.time.StopWatch;
 import org.apache.groovy.util.Maps;
 import org.apache.jmeter.samplers.Entry;
 import org.apache.jmeter.samplers.Interruptible;
@@ -44,6 +46,8 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
     private static final String AUTO_ACK                = "AMQPConsumer.AutoAck";
     private static final String RECEIVE_TIMEOUT         = "AMQPConsumer.ReceiveTimeout";
     private static final String USE_TX                  = "AMQPConsumer.UseTx";
+    private static final String CORRELATION_ID          = "AMQPConsumer.CorrelationId";
+    private static final String MESSAGE_ID              = "AMQPConsumer.MessageId";
 
     public static final String TIMESTAMP_PARAMETER      = "Timestamp";
     public static final String EXCHANGE_PARAMETER       = "Exchange";
@@ -115,12 +119,40 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
         Delivery delivery = null;
 
         try {
-            for (int idx = 0; idx < loop; idx++) {
+            StopWatch stopWatch = StopWatch.createStarted();
+            String correlationId = getCorrelationId();
+            String messageId = getMessageId();
+            for (int idx = 0; loop < 0 || idx < loop; idx++) {
                 delivery = response.poll(getReceiveTimeoutAsInt(), TimeUnit.MILLISECONDS);
 
-                if (delivery == null) {
-                    result.setResponseMessage("Timed out");
+                if (delivery == null || stopWatch.getTime(TimeUnit.MILLISECONDS) > getReceiveTimeoutAsInt()) {
+                    String message = "Time out";
+                    if(StringUtils.isNoneEmpty(correlationId)){
+                        message+=", correlationId: "+correlationId;
+                    }
+                    if(StringUtils.isNoneEmpty(messageId)){
+                        message+=", messageId: "+messageId;
+                    }
+                    result.setResponseMessage(message);
                     return result;
+                }
+                if(StringUtils.isNoneEmpty(correlationId)){
+                    if( !correlationId.equals(delivery.getProperties().getCorrelationId())){
+                        log.warn("Unexcepted correlationId {}",delivery.getProperties().getCorrelationId());
+                        if (!autoAck()) {
+                            channel.basicNack(delivery.getEnvelope().getDeliveryTag(), false, false);
+                        }
+                        continue;
+                    }
+                }
+                if(StringUtils.isNoneEmpty(messageId)){
+                    if(!messageId.equals(delivery.getProperties().getMessageId())) {
+                        log.warn("Unexcepted messageId {}",delivery.getProperties().getMessageId());
+                        if (!autoAck()) {
+                            channel.basicNack(delivery.getEnvelope().getDeliveryTag(), false, false);
+                        }
+                        continue;
+                    }
                 }
 
                 /*
@@ -261,6 +293,31 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
     public void setUseTx(Boolean tx) {
         setProperty(USE_TX, tx);
     }
+
+
+    /**
+     * @return the correlation identifier for the sample
+     */
+    public String getCorrelationId() {
+        return getPropertyAsString(CORRELATION_ID);
+    }
+
+    public void setCorrelationId(String content) {
+        setProperty(CORRELATION_ID, content);
+    }
+
+    /**
+     * @return the message id for the sample
+     */
+    public String getMessageId() {
+        return getPropertyAsString(MESSAGE_ID);
+    }
+
+    public void setMessageId(String content) {
+        setProperty(MESSAGE_ID, content);
+    }
+
+
 
     /**
      * Option if the sampler should read the response.
