@@ -54,6 +54,7 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
     public static final String ROUTING_KEY_PARAMETER    = "Routing Key";
     public static final String DELIVERY_TAG_PARAMETER   = "Delivery Tag";
     public static final String APP_ID_PARAMETER         = "Application ID";
+    public static final int DEFAULT_ITERATIONS = -1;
 
     public static final boolean DEFAULT_PURGE_QUEUE = false;
     public static final boolean DEFAULT_AUTO_ACK = true;
@@ -72,6 +73,12 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
         super();
     }
 
+    @Override
+    public int getIterationsAsInt() {
+        String intVale = getPropertyAsString(AMQPSampler.ITERATIONS);
+        if(StringUtils.isEmpty(intVale)) return DEFAULT_ITERATIONS;
+        return getPropertyAsInt(AMQPSampler.ITERATIONS, DEFAULT_ITERATIONS);
+    }
     /**
      * {@inheritDoc}
      */
@@ -97,7 +104,10 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
             if (consumer == null) {
                 log.info("Creating consumer");
                 response = new LinkedBlockingQueue<>(1);
-                consumer = (consumerTag, delivery) -> response.offer(delivery);
+                consumer = (consumerTag, delivery) -> {
+                    log.info("receive "+delivery.getProperties().getCorrelationId());
+                    response.offer(delivery);
+                };
             }
             if (consumerTag == null) {
                 log.info("Starting basic consumer");
@@ -160,6 +170,7 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
                  */
                 if (getReadResponseAsBoolean()) {
                     String responseStr = new String(delivery.getBody());
+                    log.debug("read response {}",delivery.getBody().length);
                     result.setResponseData(responseStr, StandardCharsets.UTF_8.name());
                 } else {
                     result.setResponseData("Read response failed", StandardCharsets.UTF_8.name());
@@ -168,6 +179,7 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
                 if (!autoAck()) {
                     channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
                 }
+                break;
             }
 
             // commit the sample

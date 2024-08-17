@@ -40,6 +40,7 @@ public class AMQPPublisherGui extends AMQPSamplerGui {
     private final JCheckBox timestamp = new JCheckBox("Timestamp", AMQPPublisher.DEFAULT_TIMESTAMP);
     private final JCheckBox persistent = new JCheckBox("Persistent", AMQPPublisher.DEFAULT_PERSISTENT);
     private final JCheckBox useTx = new JCheckBox("Use Transactions", AMQPPublisher.DEFAULT_USE_TX);
+    private final JCheckBox useRPC = new JCheckBox("Use RPC", AMQPPublisher.DEFAULT_USE_RPC);
 
     private final ArgumentsPanel headers = new ArgumentsPanel("Headers");
 
@@ -78,6 +79,7 @@ public class AMQPPublisherGui extends AMQPSamplerGui {
 
         persistent.setSelected(sampler.getPersistent());
         useTx.setSelected(sampler.getUseTx());
+        useRPC.setSelected(sampler.getUseRPC());
 
         messageRoutingKey.setText(sampler.getMessageRoutingKey());
         messageType.setText(sampler.getMessageType());
@@ -90,6 +92,7 @@ public class AMQPPublisherGui extends AMQPSamplerGui {
         message.setText(sampler.getMessage());
         appId.setText(sampler.getAppId());
         timestamp.setSelected(sampler.getTimestamp());
+
 
         configureHeaders(sampler);
     }
@@ -118,12 +121,14 @@ public class AMQPPublisherGui extends AMQPSamplerGui {
 
         sampler.setPersistent(persistent.isSelected());
         sampler.setUseTx(useTx.isSelected());
+        sampler.setUseRPC(useRPC.isSelected());
 
         sampler.setMessageRoutingKey(messageRoutingKey.getText());
         sampler.setMessage(message.getText());
         sampler.setMessageType(messageType.getText());
         sampler.setReplyToQueue(replyToQueue.getText());
         sampler.setCorrelationId(correlationId.getText());
+
         sampler.setMessagePriority(messagePriority.getText());
         sampler.setContentType(contentType.getText());
         sampler.setContentEncoding(contentEncoding.getText());
@@ -164,6 +169,7 @@ public class AMQPPublisherGui extends AMQPSamplerGui {
         JPanel optionsPanel = new HorizontalPanel();
         optionsPanel.add(persistent);
         optionsPanel.add(useTx);
+        optionsPanel.add(useRPC);
         messagePanel.add(optionsPanel, constraints);
 
         messagePanel.add(initMessagePropertyPanel(), constraints);
@@ -213,6 +219,7 @@ public class AMQPPublisherGui extends AMQPSamplerGui {
 
         persistent.setSelected(AMQPPublisher.DEFAULT_PERSISTENT);
         useTx.setSelected(AMQPPublisher.DEFAULT_USE_TX);
+        useRPC.setSelected(AMQPPublisher.DEFAULT_USE_RPC);
         messageRoutingKey.setText("");
         messageType.setText("");
         replyToQueue.setText("");

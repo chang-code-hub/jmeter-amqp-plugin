@@ -12,7 +12,7 @@
   <url>https://github.com/aliesbelik/jmeter-amqp-plugin</url>
 
   <properties>
-    <revision>0.3.1-SNAPSHOT</revision>
+    <revision>0.3.2-SNAPSHOT</revision>
     <java.version>1.8</java.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
@@ -26,7 +26,7 @@
 
     <!-- dependency versions -->
     <jmeter.version>5.6.3</jmeter.version>
-    <amqp.client.version>5.20.0</amqp.client.version>
+    <amqp.client.version>5.21.0</amqp.client.version>
     <commons-lang3.version>3.14.0</commons-lang3.version>
     <slf4j.version>2.0.10</slf4j.version>
     <jmeter.plugins.cmn.version>0.7</jmeter.plugins.cmn.version>
@@ -109,6 +109,7 @@
               <minimizeJar>true</minimizeJar>
               <shadedArtifactAttached>false</shadedArtifactAttached>
               <createDependencyReducedPom>false</createDependencyReducedPom>
+<!--              <outputDirectory>E:\Test\apache-jmeter-5.6.3\lib\ext</outputDirectory>-->
               <filters>
                 <filter>
                   <artifact>*:*</artifact>

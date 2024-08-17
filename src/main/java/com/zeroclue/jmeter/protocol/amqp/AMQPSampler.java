@@ -45,7 +45,7 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
     protected static final String PASSWORD              = "AMQPSampler.Password";
     protected static final String HEARTBEAT             = "AMQPSampler.Heartbeat";
     private static final String TIMEOUT                 = "AMQPSampler.Timeout";
-    private static final String ITERATIONS              = "AMQPSampler.Iterations";
+    public static final String ITERATIONS              = "AMQPSampler.Iterations";
     private static final String MESSAGE_TTL             = "AMQPSampler.MessageTTL";
     private static final String MESSAGE_EXPIRES         = "AMQPSampler.MessageExpires";
     private static final String MAX_PRIORITY            = "AMQPSampler.MaxPriority";
@@ -95,7 +95,7 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
     public static final int DEFAULT_TIMEOUT = 1000;
     public static final String DEFAULT_TIMEOUT_STRING = Integer.toString(DEFAULT_TIMEOUT);
 
-    public static final int DEFAULT_ITERATIONS = -1;
+    public static final int DEFAULT_ITERATIONS = 1;
     public static final String DEFAULT_ITERATIONS_STRING = Integer.toString(DEFAULT_ITERATIONS);
 
     public static final int DEFAULT_MIN_PRIORITY = 0;
@@ -480,7 +480,13 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
         if(connection == null) return;
         synchronized (sharedConnection) {
             if (!connection.removeReference(this)) {
-                connection.close();
+                try{
+
+                    connection.close();
+                }
+                catch (Exception e){
+                    //ignore
+                }
                 sharedConnection.remove(connection.getCacheKey());
             }
 
@@ -527,6 +533,7 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
             log.info("close connection {}", cacheKey);
 
             channelPool.close();
+
             for (Channel channel: consumeChannel){
                 try {
                     channel.close();
@@ -540,6 +547,7 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
             } catch (IOException e) {
                 log.warn("close channel error", e);
             }
+
 
         }
 
