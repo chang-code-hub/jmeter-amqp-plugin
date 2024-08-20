@@ -163,7 +163,6 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
 
             result.setDataType(SampleResult.TEXT);
             result.setRequestHeaders(formatHeaders());
-
             result.setSamplerData(StringUtils.join(request,"\n"));
             result.setResponseData(StringUtils.join(responseData, "\n"), StandardCharsets.UTF_8.name());
             result.setResponseCodeOK();
@@ -176,6 +175,7 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
             result.setResponseCode("000");
             result.setResponseMessage(ex.toString());
         } finally {
+            result.setSamplerData(StringUtils.join(request,"\n"));
             result.sampleEnd();     // end timing
         }
 
