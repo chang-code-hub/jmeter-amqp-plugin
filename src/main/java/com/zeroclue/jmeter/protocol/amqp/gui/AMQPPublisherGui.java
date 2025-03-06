@@ -1,22 +1,15 @@
 package com.zeroclue.jmeter.protocol.amqp.gui;
 
 import com.zeroclue.jmeter.protocol.amqp.AMQPPublisher;
-
-import java.awt.Dimension;
-import java.awt.GridBagConstraints;
-import java.awt.GridBagLayout;
-
-import javax.swing.BorderFactory;
-import javax.swing.JCheckBox;
-import javax.swing.JPanel;
-import javax.swing.SwingConstants;
-
 import org.apache.jmeter.config.Arguments;
 import org.apache.jmeter.config.gui.ArgumentsPanel;
 import org.apache.jmeter.gui.util.HorizontalPanel;
 import org.apache.jmeter.testelement.TestElement;
 import org.apache.jorphan.gui.JLabeledTextArea;
 import org.apache.jorphan.gui.JLabeledTextField;
+
+import javax.swing.*;
+import java.awt.*;
 
 /**
  * GUI for AMQP Publisher.
@@ -187,7 +180,6 @@ public class AMQPPublisherGui extends AMQPSamplerGui {
         constraints.anchor = GridBagConstraints.LINE_START;
         constraints.weightx = 1.0;
         constraints.weighty = 0.5;
-        constraints.gridwidth = GridBagConstraints.REMAINDER;
 
         JPanel propertyPanel = new JPanel(new GridBagLayout());
         propertyPanel.setBorder(BorderFactory.createTitledBorder(BorderFactory.createEtchedBorder(), PROPS_SETTINGS_LABEL));
@@ -196,16 +188,29 @@ public class AMQPPublisherGui extends AMQPSamplerGui {
         //timestamp.setHorizontalTextPosition(SwingConstants.LEADING);
         timestamp.setIconTextGap(35);
 
+        constraints.gridx = 0;
+        constraints.gridy = 0;
         propertyPanel.add(messageRoutingKey, constraints);
+        constraints.gridy = 1;
         propertyPanel.add(replyToQueue, constraints);
+        constraints.gridy = 2;
         propertyPanel.add(messageType, constraints);
-        propertyPanel.add(correlationId, constraints);
-        propertyPanel.add(messageId, constraints);
-        propertyPanel.add(messagePriority, constraints);
-        propertyPanel.add(appId, constraints);
-        propertyPanel.add(contentType, constraints);
-        propertyPanel.add(contentEncoding, constraints);
+        constraints.gridy = 3;
         propertyPanel.add(timestamp, constraints);
+        constraints.gridx = 1;
+        constraints.gridy = 0;
+        propertyPanel.add(correlationId, constraints);
+        constraints.gridy = 1;
+        propertyPanel.add(messageId, constraints);
+        constraints.gridy = 2;
+        propertyPanel.add(messagePriority, constraints);
+        constraints.gridx = 2;
+        constraints.gridy = 0;
+        propertyPanel.add(appId, constraints);
+        constraints.gridy = 1;
+        propertyPanel.add(contentType, constraints);
+        constraints.gridy = 2;
+        propertyPanel.add(contentEncoding, constraints);
 
         return propertyPanel;
     }
