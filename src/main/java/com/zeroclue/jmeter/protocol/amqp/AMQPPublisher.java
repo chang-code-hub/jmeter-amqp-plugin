@@ -163,19 +163,19 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
 
             result.setDataType(SampleResult.TEXT);
             result.setRequestHeaders(formatHeaders());
-            result.setSamplerData(StringUtils.join(request,"\n"));
+            result.setSamplerData(StringUtils.join(request, "\n"));
             result.setResponseData(StringUtils.join(responseData, "\n"), StandardCharsets.UTF_8.name());
             result.setResponseCodeOK();
             result.setResponseMessage("OK");
             result.setSuccessful(true);
         } catch (Exception ex) {
             log.warn(ex.getMessage(), ex);
-            result.setSamplerData(StringUtils.join(request,"\n"));
+            result.setSamplerData(StringUtils.join(request, "\n"));
             result.setResponseData(StringUtils.join(responseData, "\n"), StandardCharsets.UTF_8.name());
             result.setResponseCode("000");
             result.setResponseMessage(ex.toString());
         } finally {
-            result.setSamplerData(StringUtils.join(request,"\n"));
+            result.setSamplerData(StringUtils.join(request, "\n"));
             result.sampleEnd();     // end timing
         }
 
@@ -193,7 +193,7 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
         Map<String, String> props = new HashMap<>();
         props.put("exchange", getExchange());
         props.put("replyTo", getUseRPC() ? replyQueueName : getReplyToQueue());
-        props.put("correlationId",correlationId);
+        props.put("correlationId", correlationId);
         props.put("contentType", getContentType());
         props.put("routingKey", getMessageRoutingKey());
         props.put("contentEncoding", getContentEncoding());
