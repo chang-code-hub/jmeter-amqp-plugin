@@ -149,6 +149,7 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
                     // seen by iostat -cd 1. TPS value remains at 0.
 
                     channel.basicPublish(getExchange(), getMessageRoutingKey(), messageData.messageProperties, messageData.messageBytes);
+                    request.add(messageData.data);
                 }
             }
 
@@ -382,12 +383,12 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
         final String contentType = StringUtils.defaultIfEmpty(getContentType(), DEFAULT_CONTENT_TYPE);
 
         builder.contentType(contentType)
-            .contentEncoding(getContentEncoding())
-            .deliveryMode(deliveryMode)
-            .correlationId(correlationId)
-            .replyTo(getUseRPC() ? replyQueueName : getReplyToQueue())
-            .type(getMessageType())
-            .headers(prepareHeaders());
+                .contentEncoding(getContentEncoding())
+                .deliveryMode(deliveryMode)
+                .correlationId(correlationId)
+                .replyTo(getUseRPC() ? replyQueueName : getReplyToQueue())
+                .type(getMessageType())
+                .headers(prepareHeaders());
 
         if (getMessageId() != null && !getMessageId().isEmpty()) {
             builder.messageId(getMessageId());
@@ -427,9 +428,9 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
 
         for (Map.Entry<String, String> entry : headers.entrySet()) {
             sb.append(entry.getKey())
-                .append(": ")
-                .append(entry.getValue())
-                .append("\n");
+                    .append(": ")
+                    .append(entry.getValue())
+                    .append("\n");
         }
 
         return sb.toString();
