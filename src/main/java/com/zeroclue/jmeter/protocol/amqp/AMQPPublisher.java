@@ -8,11 +8,13 @@ import org.apache.jmeter.samplers.Entry;
 import org.apache.jmeter.samplers.Interruptible;
 import org.apache.jmeter.samplers.SampleResult;
 import org.apache.jmeter.testelement.property.TestElementProperty;
+import org.apache.jmeter.threads.JMeterContext;
 import org.apache.logging.log4j.core.lookup.StrSubstitutor;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
@@ -78,6 +80,40 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
         result.setSuccessful(false);
         result.setResponseCode(DEFAULT_RESPONSE_CODE);
 
+        if (StringUtils.isNotEmpty(this.getLogFile())) {
+
+            if(this.logger==null) {
+                Long sizeLimit = null;
+                if (StringUtils.isNoneEmpty(this.getLogFileSizeLimit())) {
+                    sizeLimit = Long.valueOf(this.getLogFileSizeLimit());
+                }
+
+                try {
+                    // 获取当前线程的上下文
+                    JMeterContext context = getThreadContext();
+                    String fileName = replaceTemplateVariables(this.getLogFile(), context);
+                    ConcurrentFileLogger logger = null;
+                    logger = ConcurrentFileLogger.getInstance(fileName, sizeLimit, this);
+
+                    if (logger != this.logger) {
+                        if (this.logger != null) {
+                            this.logger.close(this);
+                        }
+                        this.logger = logger;
+                    }
+                    ConcurrentFileLogger metricsLog = ConcurrentFileLogger.getInstance(fileName + "metric", sizeLimit, this);
+                    if (metricsLog != this.metricsLog) {
+                        if (this.metricsLog != null) {
+                            this.metricsLog.close(this);
+                        }
+                        this.metricsLog = metricsLog;
+                    }
+                } catch (Exception ex) {
+                    log.error("Create Logger Error", ex);
+                }
+            }
+        }
+
         try {
             initChannel();
 
@@ -112,14 +148,24 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
 
             String[] waitCorrelationId = new String[1];
 
+            String formatHeader =formatLogHeaders();
             if (getUseRPC()) {
                 final BlockingQueue<String> response = new ArrayBlockingQueue<>(1);
 
                 //try (BorrowedChannel channel2 = borrowChannel()) {
                 Channel consumerChannel = channel;// channel2.getChannel();
                 String ctag = consumerChannel.basicConsume(replyQueueName, true, (consumerTag, delivery) -> {
+                    String encoding = getContentEncoding();
+                    if (StringUtils.isEmpty(encoding)) {
+                        encoding = "utf-8";
+                    }
+                    String messageStr = new String(delivery.getBody(), encoding);
+                    if (this.logger != null) {
+                        this.writeLog("RECV", delivery.getProperties().getCorrelationId(), formatHeader, messageStr);
+                    }
+
                     if (delivery.getProperties().getCorrelationId().equals(waitCorrelationId[0])) {
-                        response.offer(new String(delivery.getBody(), getContentEncoding()));
+                        response.offer(messageStr);
                     }
                 }, consumerTag -> {
                 });
@@ -133,6 +179,11 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
                     // seen by iostat -cd 1. TPS value remains at 0.
 
                     channel.basicPublish(getExchange(), getMessageRoutingKey(), messageData.messageProperties, messageData.messageBytes);
+
+                    if (this.logger != null) {
+                        this.writeLog("SEND", messageData.messageProperties.getCorrelationId(),formatHeader, messageData.data);
+                    }
+
                     String responseText = response.poll(getTimeoutAsInt(), TimeUnit.MILLISECONDS);
                     responseData.add(responseText);
                 }
@@ -147,6 +198,9 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
                     // try to force jms semantics.
                     // but this does not work since RabbitMQ does not sync to disk if consumers are connected as
                     // seen by iostat -cd 1. TPS value remains at 0.
+                    if (this.logger != null) {
+                        this.writeLog("SEND", messageData.messageProperties.getCorrelationId(),formatHeader, messageData.data);
+                    }
 
                     channel.basicPublish(getExchange(), getMessageRoutingKey(), messageData.messageProperties, messageData.messageBytes);
                     request.add(messageData.data);
@@ -383,12 +437,12 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
         final String contentType = StringUtils.defaultIfEmpty(getContentType(), DEFAULT_CONTENT_TYPE);
 
         builder.contentType(contentType)
-                .contentEncoding(getContentEncoding())
-                .deliveryMode(deliveryMode)
-                .correlationId(correlationId)
-                .replyTo(getUseRPC() ? replyQueueName : getReplyToQueue())
-                .type(getMessageType())
-                .headers(prepareHeaders());
+            .contentEncoding(getContentEncoding())
+            .deliveryMode(deliveryMode)
+            .correlationId(correlationId)
+            .replyTo(getUseRPC() ? replyQueueName : getReplyToQueue())
+            .type(getMessageType())
+            .headers(prepareHeaders());
 
         if (getMessageId() != null && !getMessageId().isEmpty()) {
             builder.messageId(getMessageId());
@@ -427,12 +481,31 @@ public class AMQPPublisher extends AMQPSampler implements Interruptible {
         StringBuilder sb = new StringBuilder();
 
         for (Map.Entry<String, String> entry : headers.entrySet()) {
+            if(StringUtils.isEmpty( entry.getValue())) continue;
             sb.append(entry.getKey())
-                    .append(": ")
-                    .append(entry.getValue())
-                    .append("\n");
+                .append(": ")
+                .append(entry.getValue())
+                .append("\n");
         }
 
         return sb.toString();
+    }
+
+    public static String formatMap(Map<String, String> map) {
+        if(map==null){
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, String> entry : map.entrySet()) {
+            if (sb.length() > 0) {
+                sb.append(","); // 添加逗号分隔符
+            }
+            sb.append(entry.getKey()).append("=").append(entry.getValue());
+        }
+        return sb.toString();
+    }
+    private String formatLogHeaders() {
+        Map<String, String> headers = getHeaders().getArgumentsAsMap();
+        return formatMap(headers);
     }
 }

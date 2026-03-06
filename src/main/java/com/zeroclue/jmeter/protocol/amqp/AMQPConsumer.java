@@ -1,11 +1,6 @@
 package com.zeroclue.jmeter.protocol.amqp;
 
-import com.rabbitmq.client.Channel;
-import com.rabbitmq.client.ConsumerCancelledException;
-import com.rabbitmq.client.DeliverCallback;
-import com.rabbitmq.client.Delivery;
-import com.rabbitmq.client.ShutdownSignalException;
-
+import com.rabbitmq.client.*;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.time.StopWatch;
 import org.apache.groovy.util.Maps;
@@ -18,13 +13,10 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.security.KeyManagementException;
-import java.security.NoSuchAlgorithmException;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStateListener {
 
@@ -40,20 +32,20 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
     );
 
     //++ These are JMX names, and must not be changed
-    private static final String PREFETCH_COUNT          = "AMQPConsumer.PrefetchCount";
-    private static final String READ_RESPONSE           = "AMQPConsumer.ReadResponse";
-    private static final String PURGE_QUEUE             = "AMQPConsumer.PurgeQueue";
-    private static final String AUTO_ACK                = "AMQPConsumer.AutoAck";
-    private static final String RECEIVE_TIMEOUT         = "AMQPConsumer.ReceiveTimeout";
-    private static final String USE_TX                  = "AMQPConsumer.UseTx";
-    private static final String CORRELATION_ID          = "AMQPConsumer.CorrelationId";
-    private static final String MESSAGE_ID              = "AMQPConsumer.MessageId";
+    private static final String PREFETCH_COUNT = "AMQPConsumer.PrefetchCount";
+    private static final String READ_RESPONSE = "AMQPConsumer.ReadResponse";
+    private static final String PURGE_QUEUE = "AMQPConsumer.PurgeQueue";
+    private static final String AUTO_ACK = "AMQPConsumer.AutoAck";
+    private static final String RECEIVE_TIMEOUT = "AMQPConsumer.ReceiveTimeout";
+    private static final String USE_TX = "AMQPConsumer.UseTx";
+    private static final String CORRELATION_ID = "AMQPConsumer.CorrelationId";
+    private static final String MESSAGE_ID = "AMQPConsumer.MessageId";
 
-    public static final String TIMESTAMP_PARAMETER      = "Timestamp";
-    public static final String EXCHANGE_PARAMETER       = "Exchange";
-    public static final String ROUTING_KEY_PARAMETER    = "Routing Key";
-    public static final String DELIVERY_TAG_PARAMETER   = "Delivery Tag";
-    public static final String APP_ID_PARAMETER         = "Application ID";
+    public static final String TIMESTAMP_PARAMETER = "Timestamp";
+    public static final String EXCHANGE_PARAMETER = "Exchange";
+    public static final String ROUTING_KEY_PARAMETER = "Routing Key";
+    public static final String DELIVERY_TAG_PARAMETER = "Delivery Tag";
+    public static final String APP_ID_PARAMETER = "Application ID";
     public static final int DEFAULT_ITERATIONS = -1;
 
     public static final boolean DEFAULT_PURGE_QUEUE = false;
@@ -76,9 +68,11 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
     @Override
     public int getIterationsAsInt() {
         String intVale = getPropertyAsString(AMQPSampler.ITERATIONS);
-        if(StringUtils.isEmpty(intVale)) return DEFAULT_ITERATIONS;
+        if (StringUtils.isEmpty(intVale)) return DEFAULT_ITERATIONS;
         return getPropertyAsInt(AMQPSampler.ITERATIONS, DEFAULT_ITERATIONS);
     }
+
+
     /**
      * {@inheritDoc}
      */
@@ -105,13 +99,26 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
                 log.info("Creating consumer");
                 response = new LinkedBlockingQueue<>(1);
                 consumer = (consumerTag, delivery) -> {
-                    log.info("receive "+delivery.getProperties().getCorrelationId());
+                    log.debug("receive " + delivery.getProperties().getCorrelationId());
+
+                    if (this.logger != null) {
+
+                        String logStr = formatLog(delivery.getProperties().getHeaders());
+
+                        String messageStr = new String(delivery.getBody());
+                        if (this.logger != null) {
+                            this.writeLog("RECV", delivery.getProperties().getCorrelationId(), logStr, messageStr);
+                        }
+
+                    }
+
                     response.offer(delivery);
                 };
             }
             if (consumerTag == null) {
                 log.info("Starting basic consumer");
-                consumerTag = channel.basicConsume(getQueue(), autoAck(), consumer, consumerTag  -> { });
+                consumerTag = channel.basicConsume(getQueue(), autoAck(), consumer, (consumerTag) -> {
+                });
             }
         } catch (Exception ex) {
             log.error("Failed to initialize channel", ex);
@@ -137,27 +144,27 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
 
                 if (delivery == null || stopWatch.getTime(TimeUnit.MILLISECONDS) > getReceiveTimeoutAsInt()) {
                     String message = "Time out";
-                    if(StringUtils.isNoneEmpty(correlationId)){
-                        message+=", correlationId: "+correlationId;
+                    if (StringUtils.isNoneEmpty(correlationId)) {
+                        message += ", correlationId: " + correlationId;
                     }
-                    if(StringUtils.isNoneEmpty(messageId)){
-                        message+=", messageId: "+messageId;
+                    if (StringUtils.isNoneEmpty(messageId)) {
+                        message += ", messageId: " + messageId;
                     }
                     result.setResponseMessage(message);
                     return result;
                 }
-                if(StringUtils.isNoneEmpty(correlationId)){
-                    if( !correlationId.equals(delivery.getProperties().getCorrelationId())){
-                        log.warn("Unexcepted correlationId {}",delivery.getProperties().getCorrelationId());
+                if (StringUtils.isNoneEmpty(correlationId)) {
+                    if (!correlationId.equals(delivery.getProperties().getCorrelationId())) {
+                        log.warn("Unexcepted correlationId {}", delivery.getProperties().getCorrelationId());
                         if (!autoAck()) {
                             channel.basicNack(delivery.getEnvelope().getDeliveryTag(), false, false);
                         }
                         continue;
                     }
                 }
-                if(StringUtils.isNoneEmpty(messageId)){
-                    if(!messageId.equals(delivery.getProperties().getMessageId())) {
-                        log.warn("Unexcepted messageId {}",delivery.getProperties().getMessageId());
+                if (StringUtils.isNoneEmpty(messageId)) {
+                    if (!messageId.equals(delivery.getProperties().getMessageId())) {
+                        log.warn("Unexcepted messageId {}", delivery.getProperties().getMessageId());
                         if (!autoAck()) {
                             channel.basicNack(delivery.getEnvelope().getDeliveryTag(), false, false);
                         }
@@ -170,7 +177,7 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
                  */
                 if (getReadResponseAsBoolean()) {
                     String responseStr = new String(delivery.getBody());
-                    log.debug("read response {}",delivery.getBody().length);
+                    log.debug("read response {}", delivery.getBody().length);
                     result.setResponseData(responseStr, StandardCharsets.UTF_8.name());
                 } else {
                     result.setResponseData("Read response failed", StandardCharsets.UTF_8.name());
@@ -196,7 +203,7 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
             result.setResponseMessage("OK");
             result.setResponseCodeOK();
             result.setSuccessful(true);
-        } catch(InterruptedException ie) {
+        } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();     // re-interrupt the current thread
             response = null;
             consumer = null;
@@ -220,7 +227,6 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
 
         return result;
     }
-
 
 
     /**
@@ -330,7 +336,6 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
     }
 
 
-
     /**
      * Option if the sampler should read the response.
      *
@@ -391,10 +396,12 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
     public void cleanup() {
         try {
             if (consumerTag != null) {
-                channel.basicCancel(consumerTag);
+                if (channel != null)
+                    channel.basicCancel(consumerTag);
+                consumerTag = null;
             }
         } catch (IOException e) {
-            log.error("Couldn't safely cancel the sample {}", consumerTag, e);
+            //log.error("Couldn't safely cancel the sample {}", consumerTag, e);
         }
 
         super.cleanup();
@@ -411,11 +418,12 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
     }
 
     private Channel channel;
+
     @Override
     protected boolean initChannel() throws Exception {
         boolean ret = super.initChannel();
 
-        if(channel == null){
+        if (channel == null) {
             channel = createChannel().getChannel();
         }
         channel.basicQos(getPrefetchCountAsInt());
@@ -434,7 +442,7 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
         if (delivery.getProperties().getTimestamp() != null) {
             sb.append(TIMESTAMP_PARAMETER)
                 .append(": ")
-                .append((delivery.getProperties().getTimestamp().getTime())/1000)
+                .append((delivery.getProperties().getTimestamp().getTime()) / 1000)
                 .append("\n");
         }
 
@@ -459,7 +467,7 @@ public class AMQPConsumer extends AMQPSampler implements Interruptible, TestStat
         }
 
         if (headers != null) {
-            for (Map.Entry<String,Object> entry : headers.entrySet()) {
+            for (Map.Entry<String, Object> entry : headers.entrySet()) {
                 sb.append(entry.getKey())
                     .append(": ")
                     .append(entry.getValue())

@@ -52,6 +52,8 @@ public abstract class AMQPSamplerGui extends AbstractSamplerGui {
     protected JLabeledTextField username = new JLabeledTextField("   Username");
     protected JLabeledTextField password = new JLabeledTextField("   Password");
     protected JLabeledTextField heartbeat = new JLabeledTextField("  Heartbeat");
+    protected JLabeledTextField logFile = new JLabeledTextField("  Log File");
+    protected JLabeledTextField logFileSizeLimit = new JLabeledTextField("  Log File Size Limit");
     private final JCheckBox ssl = new JCheckBox("SSL", AMQPSampler.DEFAULT_SSL_STATE);
 
     protected final JLabeledTextField iterations = new JLabeledTextField("Number of Samples to Aggregate");
@@ -102,6 +104,8 @@ public abstract class AMQPSamplerGui extends AbstractSamplerGui {
         ssl.setSelected(sampler.getConnectionSSL());
 
         iterations.setText(sampler.getIterations());
+        logFile.setText(sampler.getLogFile());
+        logFileSizeLimit.setText(sampler.getLogFileSizeLimit());
 
         log.debug("AMQPSamplerGui.configure() called");
     }
@@ -138,6 +142,8 @@ public abstract class AMQPSamplerGui extends AbstractSamplerGui {
         ssl.setSelected(AMQPSampler.DEFAULT_SSL_STATE);
 
         iterations.setText(AMQPSampler.DEFAULT_ITERATIONS_STRING);
+        logFile.setText(AMQPSampler.DEFAULT_LOG_FILE);
+        logFileSizeLimit.setText(AMQPSampler.DEFAULT_LOG_FILE_SIZE_LIMIT);
     }
 
     /**
@@ -176,6 +182,9 @@ public abstract class AMQPSamplerGui extends AbstractSamplerGui {
         sampler.setConnectionSSL(ssl.isSelected());
 
         sampler.setIterations(iterations.getText());
+        sampler.setLogFile(logFile.getText());
+        sampler.setLogFileSizeLimit(logFileSizeLimit.getText());
+
 
         log.debug("AMQPSamplerGui.modifyTestElement() called, set user/pass to {}/{} on sampler {}",
             username.getText(), password.getText(), sampler);
@@ -331,6 +340,14 @@ public abstract class AMQPSamplerGui extends AbstractSamplerGui {
         gridBagConstraints.gridx = 0;
         gridBagConstraints.gridy = 7;
         serverSettings.add(ssl, gridBagConstraints);
+
+        gridBagConstraints.gridx = 0;
+        gridBagConstraints.gridy = 8;
+        serverSettings.add(logFile, gridBagConstraints);
+
+        gridBagConstraints.gridx = 0;
+        gridBagConstraints.gridy = 9;
+        serverSettings.add(logFileSizeLimit, gridBagConstraints);
 
         gridBagConstraintsCommon.gridx = 1;
         gridBagConstraintsCommon.gridy = 0;

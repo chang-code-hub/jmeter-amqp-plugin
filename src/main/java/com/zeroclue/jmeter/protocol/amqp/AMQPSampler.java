@@ -1,19 +1,9 @@
 package com.zeroclue.jmeter.protocol.amqp;
 
 import com.rabbitmq.client.Address;
-import com.rabbitmq.client.AlreadyClosedException;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
-import com.rabbitmq.client.ShutdownSignalException;
-
-import java.io.IOException;
-import java.lang.ref.WeakReference;
-import java.security.KeyManagementException;
-import java.security.NoSuchAlgorithmException;
-import java.util.*;
-import java.util.concurrent.TimeoutException;
-
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.pool2.BasePooledObjectFactory;
 import org.apache.commons.pool2.PooledObject;
@@ -22,39 +12,52 @@ import org.apache.commons.pool2.impl.GenericObjectPool;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import org.apache.jmeter.samplers.AbstractSampler;
 import org.apache.jmeter.testelement.ThreadListener;
+import org.apache.jmeter.threads.JMeterContext;
+import org.apache.jmeter.threads.JMeterVariables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.lang.ref.WeakReference;
+import java.security.KeyManagementException;
+import java.security.NoSuchAlgorithmException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import java.util.concurrent.TimeoutException;
 
 public abstract class AMQPSampler extends AbstractSampler implements ThreadListener {
 
     private static final Logger log = LoggerFactory.getLogger(AMQPSampler.class);
 
     //++ These are JMX names, and must not be changed
-    protected static final String EXCHANGE              = "AMQPSampler.Exchange";
-    protected static final String EXCHANGE_TYPE         = "AMQPSampler.ExchangeType";
-    protected static final String EXCHANGE_DURABLE      = "AMQPSampler.ExchangeDurable";
-    protected static final String EXCHANGE_REDECLARE    = "AMQPSampler.ExchangeRedeclare";
-    protected static final String EXCHANGE_AUTO_DELETE  = "AMQPSampler.ExchangeAutoDelete";
-    protected static final String QUEUE                 = "AMQPSampler.Queue";
-    protected static final String ROUTING_KEY           = "AMQPSampler.RoutingKey";
-    protected static final String VIRTUAL_HOST          = "AMQPSampler.VirtualHost";
-    protected static final String HOST                  = "AMQPSampler.Host";
-    protected static final String PORT                  = "AMQPSampler.Port";
-    protected static final String SSL                   = "AMQPSampler.SSL";
-    protected static final String USERNAME              = "AMQPSampler.Username";
-    protected static final String PASSWORD              = "AMQPSampler.Password";
-    protected static final String HEARTBEAT             = "AMQPSampler.Heartbeat";
-    private static final String TIMEOUT                 = "AMQPSampler.Timeout";
-    public static final String ITERATIONS              = "AMQPSampler.Iterations";
-    private static final String MESSAGE_TTL             = "AMQPSampler.MessageTTL";
-    private static final String MESSAGE_EXPIRES         = "AMQPSampler.MessageExpires";
-    private static final String MAX_PRIORITY            = "AMQPSampler.MaxPriority";
-    private static final String QUEUE_DURABLE           = "AMQPSampler.QueueDurable";
-    private static final String QUEUE_REDECLARE         = "AMQPSampler.Redeclare";
-    private static final String QUEUE_EXCLUSIVE         = "AMQPSampler.QueueExclusive";
-    private static final String QUEUE_AUTO_DELETE       = "AMQPSampler.QueueAutoDelete";
+    protected static final String EXCHANGE = "AMQPSampler.Exchange";
+    protected static final String EXCHANGE_TYPE = "AMQPSampler.ExchangeType";
+    protected static final String EXCHANGE_DURABLE = "AMQPSampler.ExchangeDurable";
+    protected static final String EXCHANGE_REDECLARE = "AMQPSampler.ExchangeRedeclare";
+    protected static final String EXCHANGE_AUTO_DELETE = "AMQPSampler.ExchangeAutoDelete";
+    protected static final String QUEUE = "AMQPSampler.Queue";
+    protected static final String ROUTING_KEY = "AMQPSampler.RoutingKey";
+    protected static final String VIRTUAL_HOST = "AMQPSampler.VirtualHost";
+    protected static final String HOST = "AMQPSampler.Host";
+    protected static final String PORT = "AMQPSampler.Port";
+    protected static final String SSL = "AMQPSampler.SSL";
+    protected static final String USERNAME = "AMQPSampler.Username";
+    protected static final String PASSWORD = "AMQPSampler.Password";
+    protected static final String HEARTBEAT = "AMQPSampler.Heartbeat";
+    private static final String TIMEOUT = "AMQPSampler.Timeout";
+    public static final String ITERATIONS = "AMQPSampler.Iterations";
+    private static final String MESSAGE_TTL = "AMQPSampler.MessageTTL";
+    private static final String MESSAGE_EXPIRES = "AMQPSampler.MessageExpires";
+    private static final String MAX_PRIORITY = "AMQPSampler.MaxPriority";
+    private static final String QUEUE_DURABLE = "AMQPSampler.QueueDurable";
+    private static final String LOG_FILE = "AMQPSampler.LogFile";
+    private static final String LOG_FILE_SIZE_LIMIT = "AMQPSampler.LogFileSizeLimit";
+    private static final String QUEUE_REDECLARE = "AMQPSampler.Redeclare";
+    private static final String QUEUE_EXCLUSIVE = "AMQPSampler.QueueExclusive";
+    private static final String QUEUE_AUTO_DELETE = "AMQPSampler.QueueAutoDelete";
 
-    public static final String[] EXCHANGE_TYPES = new String[] {
+    public static final String[] EXCHANGE_TYPES = new String[]{
         "direct",
         "topic",
         "headers",
@@ -88,6 +91,8 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
 
     public static final boolean DEFAULT_SSL_STATE = false;
     public static final String DEFAULT_SSL_PROTOCOL = "TLS";
+    public static final String DEFAULT_LOG_FILE = "";
+    public static final String DEFAULT_LOG_FILE_SIZE_LIMIT = "20971520";
 
     public static final int DEFAULT_PORT = 5672;
     public static final String DEFAULT_PORT_STRING = Integer.toString(DEFAULT_PORT);
@@ -114,11 +119,35 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
 
     private boolean isInitial;
 
+    protected ConcurrentFileLogger logger;
+    protected ConcurrentFileLogger metricsLog;
+
+
+    // 手动替换模板中的变量
+    public String replaceTemplateVariables(String template, JMeterContext context) {
+        if(template==null) return null;
+        String result = template;
+        // 获取 JMeter 上下文中的变量
+        JMeterVariables vars = context.getVariables();
+        if (vars != null) {
+            // 遍历所有变量并进行替换
+            for (Map.Entry<String, Object> entry : vars.entrySet()) {
+                String variableName = entry.getKey();
+                if (StringUtils.isEmpty(variableName)) continue;
+                String variableValue = entry.getValue() == null ? "" : String.valueOf(entry.getValue());
+                result = result.replace("${" + variableName + "}", variableValue);
+            }
+        }
+
+        return result;
+    }
+
+
     protected boolean initChannel() throws Exception {
 
         if (!isInitial) {
 
-            try( BorrowedChannel channel = borrowChannel()) {
+            try (BorrowedChannel channel = borrowChannel()) {
                 boolean queueConfigured = configureQueue(channel.getChannel());
 
                 if (!StringUtils.isBlank(getExchange())) {   // use a named exchange
@@ -133,6 +162,7 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
                     }
                 }
 
+
                 log.debug("Bound to:"
                         + "\n\t queue: {}"
                         + "\n\t exchange: {}"
@@ -140,8 +170,7 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
                         + "\n\t routing key: {}"
                         + "\n\t arguments: {}",
                     getQueue(), getExchange(), getExchangeDurable(), getRoutingKey(), getQueueArguments());
-            }
-            catch (Exception e){
+            } catch (Exception e) {
                 log.warn("initial channel fail {}", e.getMessage(), e);
             }
         }
@@ -180,7 +209,6 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
 
         return arguments;
     }
-
 
 
     /**
@@ -397,7 +425,7 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
     public int getHeartbeatAsInt() {
         String hbstr = getPropertyAsString(HEARTBEAT);
 
-        if(StringUtils.isEmpty(hbstr)){
+        if (StringUtils.isEmpty(hbstr)) {
             return DEFAULT_HEARTBEAT;
         }
         int hb = Integer.parseInt(hbstr);
@@ -425,6 +453,23 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
 
     public boolean queueDurable() {
         return getPropertyAsBoolean(QUEUE_DURABLE);
+    }
+
+
+    public void setLogFile(String value) {
+        setProperty(LOG_FILE, value.toString());
+    }
+
+    public String getLogFile() {
+        return getPropertyAsString(LOG_FILE);
+    }
+
+    public void setLogFileSizeLimit(String value) {
+        setProperty(LOG_FILE_SIZE_LIMIT, value);
+    }
+
+    public String getLogFileSizeLimit() {
+        return getPropertyAsString(LOG_FILE_SIZE_LIMIT);
     }
 
     /**
@@ -477,19 +522,31 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
     }
 
     protected void cleanup() {
-        if(connection == null) return;
+        if (logger != null) {
+            try {
+                logger.close(this);
+            } catch (IOException e) {
+
+            }
+        }
+        if (metricsLog != null) {
+            try {
+                metricsLog.close(this);
+            } catch (IOException e) {
+
+            }
+        }
+        if (connection == null) return;
         synchronized (sharedConnection) {
             if (!connection.removeReference(this)) {
-                try{
+                try {
 
                     connection.close();
-                }
-                catch (Exception e){
+                } catch (Exception e) {
                     //ignore
                 }
                 sharedConnection.remove(connection.getCacheKey());
             }
-
         }
     }
 
@@ -502,26 +559,26 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
     public void threadStarted() {
     }
 
-    private static final Map<String, CachedConnection> sharedConnection = Collections.synchronizedMap( new HashMap<>());
+    private static final Map<String, CachedConnection> sharedConnection = Collections.synchronizedMap(new HashMap<>());
 
-    public static class CachedConnection{
+    public static class CachedConnection {
         private final String cacheKey;
         private final Connection connection;
 
-        private final GenericObjectPool<Channel> channelPool ;
+        private final GenericObjectPool<Channel> channelPool;
 
         private final List<WeakReference<Object>> references = new ArrayList<>();
 
-        public void addReference(Object object){
+        public void addReference(Object object) {
             synchronized (references) {
                 references.add(new WeakReference<>(object));
             }
         }
 
-        public boolean removeReference(Object object){
+        public boolean removeReference(Object object) {
             synchronized (references) {
-                for (WeakReference<Object> ref : new ArrayList<>( references)) {
-                    if(ref.get()==null|| ref.get() == object){
+                for (WeakReference<Object> ref : new ArrayList<>(references)) {
+                    if (ref.get() == null || ref.get() == object) {
                         references.remove(ref);
                     }
                 }
@@ -529,12 +586,12 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
             }
         }
 
-        public void close(){
+        public void close() {
             log.info("close connection {}", cacheKey);
 
             channelPool.close();
 
-            for (Channel channel: consumeChannel){
+            for (Channel channel : consumeChannel) {
                 try {
                     channel.close();
                 } catch (Exception e) {
@@ -553,7 +610,7 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
 
         private final List<Channel> consumeChannel = new ArrayList<>();
 
-        public CachedConnection(String cacheKey, Connection connection){
+        public CachedConnection(String cacheKey, Connection connection) {
             this.cacheKey = cacheKey;
             this.connection = connection;
             GenericObjectPoolConfig objectPoolConfig = new GenericObjectPoolConfig();
@@ -583,13 +640,13 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
                     log.debug("pool destroy channel");
                     try {
                         p.getObject().close();
-                    } catch (Exception e){
+                    } catch (Exception e) {
 
                     }
                     super.destroyObject(p);
                 }
 
-            },objectPoolConfig);
+            }, objectPoolConfig);
         }
 
         public Channel borrawChannel() throws Exception {
@@ -597,10 +654,11 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
             return channelPool.borrowObject();
         }
 
-        public void returnChannel(Channel channel){
+        public void returnChannel(Channel channel) {
             log.debug("return channel");
             channelPool.returnObject(channel);
         }
+
         public Channel createChannel() throws IOException {
             log.debug("create channel");
             Channel channel = connection.createChannel();
@@ -608,7 +666,7 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
             return channel;
         }
 
-        public void removeChannel(Channel channel){
+        public void removeChannel(Channel channel) {
             log.debug("remove channel");
             try {
                 channel.close();
@@ -631,10 +689,12 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
         public Channel getChannel() {
             return channel;
         }
-        public ChannelWrapper(Channel channel ) {
+
+        public ChannelWrapper(Channel channel) {
             this.channel = channel;
         }
     }
+
     public static class BorrowedChannel extends ChannelWrapper implements AutoCloseable {
 
         private final CachedConnection connection;
@@ -646,36 +706,40 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
         }
 
         @Override
-        public void close()  {
+        public void close() {
             this.connection.returnChannel(this.channel);
         }
     }
-    private String getCacheKey(){
-        return  "amqp://" +
+
+    private String getCacheKey() {
+        return "amqp://" +
             getUsername() +
             "@" +
-            getHost() + ":" + getPortAsInt() + getVirtualHost()+"?ssl="+getConnectionSSL() ;
+            getHost() + ":" + getPortAsInt() + getVirtualHost() + "?ssl=" + getConnectionSSL();
 
     }
 
     protected BorrowedChannel borrowChannel() throws Exception {
         CachedConnection connection = getConnection();
-        return new BorrowedChannel( connection.borrawChannel(), connection);
+        return new BorrowedChannel(connection.borrawChannel(), connection);
     }
+
     protected ChannelWrapper createChannel() throws Exception {
         CachedConnection connection = getConnection();
-        return new ChannelWrapper( connection.createChannel());
+        return new ChannelWrapper(connection.createChannel());
     }
+
     private CachedConnection connection;
+
     private CachedConnection getConnection() throws Exception {
-        if(connection!=null) return connection;
+        if (connection != null) return connection;
 
         String cacheKey = getCacheKey();
 
         synchronized (sharedConnection) {
             connection = sharedConnection.get(cacheKey);
 
-            if (connection == null ) { //|| !connection.isOpen()
+            if (connection == null) { //|| !connection.isOpen()
                 log.info("Creating connection {}", cacheKey);
                 factory.setConnectionTimeout(getTimeoutAsInt());
                 factory.setVirtualHost(getVirtualHost());
@@ -697,8 +761,8 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
                         + "\n\t timeout: {}"
                         + "\n\t heartbeat: {}"
                         + "\nin {}",
-                        getVirtualHost(), getHost(), getPort(), getUsername(), getPassword(), getTimeout(),
-                        getHeartbeatAsInt(), this);
+                    getVirtualHost(), getHost(), getPort(), getUsername(), getPassword(), getTimeout(),
+                    getHeartbeatAsInt(), this);
 
                 String[] hosts = getHost().split(",");
                 Address[] addresses = new Address[hosts.length];
@@ -723,6 +787,44 @@ public abstract class AMQPSampler extends AbstractSampler implements ThreadListe
 
     }
 
+    // 定义时间格式
+    private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
+
+
+    public static String formatLog(Map<String, Object> map) {
+        if (map == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, Object> entry : map.entrySet()) {
+            if (null == entry.getValue()) continue;
+            if (sb.length() > 0) {
+                sb.append(","); // 添加逗号分隔符
+            }
+            sb.append(entry.getKey()).append("=").append(entry.getValue());
+        }
+        return sb.toString();
+    }
+
+    protected void writeLog(String type, String correlationId, String header, String body) {
+        if (this.logger == null) return;
+        try {
+            StringBuilder sb = new StringBuilder();
+            sb.append("[").append(LocalDateTime.now().format(formatter)).append("] ")
+                .append("TYPE=").append(type).append(",")
+                .append("ID=").append(correlationId).append(",");
+            if (header != null)
+                sb.append(header);
+            if (metricsLog != null)
+                this.metricsLog.log(sb.toString());
+            if (body != null) {
+                sb.append("\n").append(body);
+            }
+            this.logger.log(sb.toString());
+        } catch (Exception e) {
+            log.error("Failed to write log.", e);
+        }
+    }
 
     protected void deleteQueue() {
         // use a different channel since channel closes on exception.
